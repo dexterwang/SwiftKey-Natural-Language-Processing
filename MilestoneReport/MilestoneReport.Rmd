@@ -1,0 +1,283 @@
+---
+title: "SwiftKey Natural Language Processing"
+author: "Dexter Wang"
+date: "15 June 2016"
+output: html_document
+---
+
+#Synopsis 
+
+####SwiftKey is smart input method on mobile devices. It applies Natural Language Processing and machine learning technologies to provide predictions of next words while user is typing.
+
+####The goal of this project is to develop a similar data product using the knowledge learned from Cursera data science specification. 
+####Tasks includes
+1. Getting and cleansing blog, news and twitter data.
+2. Conduct exploratory data analysis
+3. Design an algorithm which could efficiently predict the next word user tends to type, using limited storage and computational resources
+4. Develop a data product using Shiny to show its function
+5. Demonstrate the project through a presentation.
+
+####This report shows the early stage progress of the project. It involves an exploration of the source data as well as a proposal of prediction model and data product building process. 
+ 
+
+#Data Pre-processing 
+####The data comes from three source files which consist of blogs, news and tweets written in English.
+####The data cleansing process includes:
+* Remove non-English characters 
+* Lower casing characters
+* Remove extra white spaces
+* Remove punctuations and unwanted symbols 
+* Remove profanity
+* Word stemming
+
+####The first three steps are applied directly on raw dataset and the last three are applied through tokenisation which is a step of building n-grams data model. The "quanteda" has been chosen for the Natural Language Processing (NLP). It seems easier to use compared to the "tm" package.
+
+#Data Exploration
+```{r message=FALSE,echo=FALSE,warning=FALSE}
+setwd("C:/D/R/Capstone Project/Coursera-SwiftKey/final/en_US")
+library(quanteda)
+library(dplyr)
+```
+
+```{r message=FALSE,echo=FALSE,warning=FALSE,cache=TRUE}
+
+setwd("C:/D/R/Capstone Project/Coursera-SwiftKey/final/en_US")
+
+rm(list=ls())
+
+
+con <- file("./en_US.blogs.txt","r")
+en_US_blogs <- readLines(con)
+close(con)
+
+con <- file("./en_US.news.txt","r")
+en_US_news <- readLines(con)
+close(con)
+
+con <- file("./en_US.twitter.txt","r")
+en_US_twitter <- readLines(con)
+close(con)
+
+datasize<- data.frame(dataset=c("en_US.blogs","en_US.news","en_US.twitter"),instances=c(length(en_US_blogs),length(en_US_news),length(en_US_twitter)))
+
+```
+
+```{r message=FALSE,echo=FALSE,warning=FALSE,cache=TRUE}
+
+setwd("C:/D/R/Capstone Project/Coursera-SwiftKey/final/en_US")
+library(quanteda)
+library(dplyr)
+
+#data cleansering & transformation
+# 1. remove foreign charactors
+# 2. remove white space
+# 3. change to lower case
+
+data_clean <- function(x){
+	x <- gsub("[^([:alnum:]|[:punct:])]"," ",x)
+	x <- gsub("[גדנ]"," ",x)
+	x <- gsub("\\s+"," ",x)
+	x <- gsub("^\\s+|\\s+$","",x)
+	x <- tolower(x)
+	x
+}
+
+en_US_blogs <- data_clean(en_US_blogs)
+en_US_news <- data_clean(en_US_news)
+en_US_twitter <- data_clean(en_US_twitter)
+
+
+# 4. get profanity list
+
+con <- file("../../../profanity_from_google.csv","r")
+profanity_list <- readLines(con)
+close(con)
+
+profanity_list <- data_clean(profanity_list)
+
+b_tokenized<- tokenize(en_US_blogs, removeNumbers = TRUE, removePunct = FALSE, removeTwitter = TRUE)
+n_tokenized<- tokenize(en_US_news, removeNumbers = TRUE, removePunct = FALSE, removeTwitter = TRUE)
+t_tokenized<- tokenize(en_US_twitter, removeNumbers = TRUE, removePunct = FALSE, removeTwitter = TRUE)
+```
+
+```{r message=FALSE,echo=FALSE,warning=FALSE,cache=TRUE}
+
+b_wordcount<- sum(ntoken(b_tokenized))
+n_wordcount<- sum(ntoken(n_tokenized))
+t_wordcount<- sum(ntoken(t_tokenized))
+
+b_profanity<- selectFeatures(b_tokenized, features=profanity_list, selection = "keep",valuetype="fixed") %>% ntoken() %>% sum()
+
+n_profanity<- selectFeatures(n_tokenized, features=profanity_list, selection = "keep",valuetype="fixed") %>% ntoken() %>% sum()
+
+t_profanity<- selectFeatures(t_tokenized, features=profanity_list, selection = "keep",valuetype="fixed") %>% ntoken() %>% sum()
+
+b_stopword<- selectFeatures(b_tokenized, features=stopwords("english"), selection = "keep",valuetype="fixed") %>% ntoken() %>% sum()
+
+n_stopword<- selectFeatures(n_tokenized, features=stopwords("english"), selection = "keep",valuetype="fixed") %>% ntoken() %>% sum()
+
+t_stopword<- selectFeatures(t_tokenized, features=stopwords("english"), selection = "keep",valuetype="fixed") %>% ntoken() %>% sum()
+  
+datasize$word.count <- c(b_wordcount,n_wordcount,t_wordcount)
+
+datasize$stopword <- c(paste("",round(b_stopword*100/b_wordcount,2),"%"),paste("",round(n_stopword*100/n_wordcount,2),"%"),paste("",round(t_stopword*100/t_wordcount,2),"%"))
+
+datasize$profanity <- c(paste("",round(b_profanity*100/b_wordcount,2),"%"),paste("",round(n_profanity*100/n_wordcount,2),"%"),paste("",round(t_profanity*100/t_wordcount,2),"%"))
+
+
+
+```
+
+####The table below shows some general statistics on the source data. Note that English stop words takes a large proportion (around 34-42%) of total population. There is an option to retain or remove stop words in the n-gram model, which will be tested later on. In terms of profanity, [a checking list of Google's banned bad words](https://gist.github.com/ryanlewis/a37739d710ccdb4b406d) is applied for filtering. It turns out that twitter is most informal with 0.46% of bad words which is 10 times higher compared to that of News articles.   
+ 
+```{r message=FALSE,echo=FALSE,warning=FALSE}
+
+datasize
+
+```
+
+####The next step is to investigate the ngrams model. To be more efficient, a small random sample of 1/100 instances from the three sources is chosen to be examined. Since the data is randomly selected, it should reflect the distribution of the true population. The source data are combined and tokenised with profanity and punctuation removed. We build unigram, bigram and trigram on the dataset with or without stop words and compare this two options together. 
+
+```{r message=FALSE,echo=FALSE,warning=FALSE}
+
+S_en_US_blogs <- sample(en_US_blogs, length(en_US_blogs)/100)
+S_en_US_news <- sample(en_US_news, length(en_US_news)/100)
+S_en_US_twitter <- sample(en_US_twitter, length(en_US_twitter)/100)
+
+S_combined <- c(S_en_US_blogs,S_en_US_news,S_en_US_twitter)
+
+S_tokenized<- tokenize(S_combined, removeNumbers = TRUE, removePunct = TRUE, removeTwitter = TRUE)
+S_tokenized<- selectFeatures(S_tokenized, features=profanity_list, selection = "remove",valuetype="fixed")
+S_tokenized_nostop <- selectFeatures(S_tokenized, features=stopwords("english"), selection = "remove")
+
+S_unigram <- unlist(ngrams(S_tokenized, n = 1L, skip = 0L, concatenator = " "))
+
+S_unigram <- data.frame(Unigram=S_unigram)
+
+S_unigram_agg <- S_unigram %>% group_by(Unigram) %>% summarise(count=n()) %>% arrange(desc(count))
+
+S_unigram_ns <- unlist(ngrams(S_tokenized_nostop, n = 1L, skip = 0L, concatenator = " ",ignoredFeatures = stopwords("english")))
+
+S_unigram_ns  <- data.frame(Unigram=S_unigram_ns)
+
+S_unigram_ns_agg <- S_unigram_ns %>% group_by(Unigram) %>% summarise(count=n()) %>% arrange(desc(count))
+
+S_bigram <- unlist(ngrams(S_tokenized, n = 2L, skip = 0L, concatenator = " "))
+
+S_bigram <- data.frame(Bigram=S_bigram)
+
+S_bigram_agg <- S_bigram %>% group_by(Bigram) %>% summarise(count=n()) %>% arrange(desc(count))
+
+S_bigram_ns <- unlist(ngrams(S_tokenized_nostop, n = 2L, skip = 0L, concatenator = " ",ignoredFeatures = stopwords("english")))
+
+S_bigram_ns  <- data.frame(Bigram=S_bigram_ns)
+
+S_bigram_ns_agg <- S_bigram_ns %>% group_by(Bigram) %>% summarise(count=n()) %>% arrange(desc(count))
+
+
+S_trigram <- unlist(ngrams(S_tokenized, n = 3L, skip = 0L, concatenator = " "))
+
+S_trigram <- data.frame(Trigram=S_trigram)
+
+S_trigram_agg <- S_trigram %>% group_by(Trigram) %>% summarise(count=n()) %>% arrange(desc(count))
+
+S_trigram_ns <- unlist(ngrams(S_tokenized_nostop, n = 3L, skip = 0L, concatenator = " ",ignoredFeatures = stopwords("english")))
+
+S_trigram_ns  <- data.frame(Trigram=S_trigram_ns)
+
+S_trigram_ns_agg <- S_trigram_ns %>% group_by(Trigram) %>% summarise(count=n()) %>% arrange(desc(count))
+
+library(ggplot2)
+```
+
+####The figures below show the top 20 Unigram, Bigram and Trigram for the cleaned dataset before or after stop words removed. It can be seen that stop words are most frequently used which dominant the top list of the ngrams. After removing stop words, some popular phrased appear on the top list. The dataset seems need to be stemmed so that various forms of words such as negation will also go off the list.    
+
+```{r fig.width=3, fig.height=6,echo=FALSE,out.extra='style="float:left"'}
+plotTable <- within(S_unigram_agg[1:20,], 
+                   Unigram <- reorder(Unigram,count))
+
+ggplot(plotTable,aes(x=Unigram,y=count))+geom_bar(stat="identity")+coord_flip()
+
+```
+
+```{r fig.width=3, fig.height=6,echo=FALSE, out.extra='style="float:left"'}
+plotTable <- within(S_bigram_agg[1:20,], 
+                   Bigram <- reorder(Bigram,count))
+
+ggplot(plotTable,aes(x=Bigram,y=count))+geom_bar(stat="identity")+coord_flip()
+
+```
+
+```{r fig.width=3, fig.height=6,echo=FALSE, out.extra='style="float:left"'}
+plotTable <- within(S_trigram_agg[1:20,], 
+                   Trigram <- reorder(Trigram,count))
+
+ggplot(plotTable,aes(x=Trigram,y=count))+geom_bar(stat="identity")+coord_flip()
+
+```
+
+```{r fig.width=3, fig.height=6,echo=FALSE,out.extra='style="float:left"'}
+plotTable <- within(S_unigram_ns_agg[1:20,], 
+                   Unigram <- reorder(Unigram,count))
+
+ggplot(plotTable,aes(x=Unigram,y=count))+geom_bar(stat="identity")+coord_flip()
+
+```
+
+```{r fig.width=3, fig.height=6,echo=FALSE, out.extra='style="float:left"'}
+plotTable <- within(S_bigram_ns_agg[1:20,], 
+                   Bigram <- reorder(Bigram,count))
+
+ggplot(plotTable,aes(x=Bigram,y=count))+geom_bar(stat="identity")+coord_flip()
+
+```
+
+```{r fig.width=3, fig.height=6,echo=FALSE, out.extra='style="float:left"'}
+plotTable <- within(S_trigram_ns_agg[1:20,], 
+                   Trigram <- reorder(Trigram,count))
+
+ggplot(plotTable,aes(x=Trigram,y=count))+geom_bar(stat="identity")+coord_flip()
+
+```
+
+```{r message=FALSE,echo=FALSE,warning=FALSE,results='asis',cache=TRUE}
+ngrem_prof <- data.frame(type=c("Unigram","Bigram","Trigram","Unigram_nostop","Bigram_nostop","Trigram_nostop"))
+ngrem_prof$Tokens<- c(sum(S_unigram_agg$count),sum(S_bigram_agg$count),sum(S_trigram_agg$count),sum(S_unigram_ns_agg$count),sum(S_bigram_ns_agg$count),sum(S_trigram_ns_agg$count))
+ngrem_prof$unique.terms<- c(nrow(S_unigram_agg),nrow(S_bigram_agg),nrow(S_trigram_agg),nrow(S_unigram_ns_agg),nrow(S_bigram_ns_agg),nrow(S_trigram_ns_agg))
+
+findb <- function(x,p){
+  csum <- cumsum(x[,2])
+  
+  total <- sum(x[,2])
+  
+  index <- min(which(csum*100/total>=p))
+  
+  index
+  
+}
+
+ngrem_prof$coverage.50 <- c(findb(S_unigram_agg,50),findb(S_bigram_agg,50),findb(S_trigram_agg,50),findb(S_unigram_ns_agg,50),findb(S_bigram_ns_agg,50),findb(S_trigram_ns_agg,50))
+
+ngrem_prof <- ngrem_prof %>% mutate( percent.50 =paste("",round(coverage.50*100/unique.terms,2),"%"))
+
+ngrem_prof$coverage.90 <- c(findb(S_unigram_agg,90),findb(S_bigram_agg,90),findb(S_trigram_agg,90),findb(S_unigram_ns_agg,90),findb(S_bigram_ns_agg,90),findb(S_trigram_ns_agg,90))
+
+ngrem_prof <- ngrem_prof %>% mutate( percent.90 =paste("",round(coverage.90*100/unique.terms,2),"%"))
+
+
+
+```
+
+```{r fig.width=3, fig.height=6,echo=FALSE, out.extra='style="float:none"'} 
+```
+
+
+####The table below shows the number of unique terms required to provide given percentage of coverage of the dataset. It appears that the distribution of the terms are exponential. For example, only 121 unique unigrams covers 50% of the total words, but it requires 6488 to rich 90% coverage. The Bigrams and Trigrams consists of much more unique combinations and requires exponentialy higher amount of unique terms to provide certain coverage. 
+
+``````{r message=FALSE,echo=FALSE,warning=FALSE,options(width=120)}
+
+ngrem_prof   
+```
+
+
+##Thanks for viewing :)
