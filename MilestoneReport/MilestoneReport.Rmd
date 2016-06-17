@@ -190,7 +190,7 @@ S_trigram_ns_agg <- S_trigram_ns %>% group_by(Trigram) %>% summarise(count=n()) 
 library(ggplot2)
 ```
 
-####The figures below show the top 20 Unigram, Bigram and Trigram for the cleaned dataset before or after stop words removed. It can be seen that stop words are most frequently used which dominant the top list of the ngrams. After removing stop words, some popular phrased appear on the top list. The dataset seems need to be stemmed so that various forms of words such as negation will also go off the list.    
+####The figures below show the top 20 Unigram, Bigram and Trigram for the cleaned dataset before or after removing stop words. It can be seen that stop words are most frequently used and dominant the top list of the ngrams. After removing stop words, some popular phrases appear on the top list. The dataset seems need to be stemmed so that various forms of words such as negation will also go off the list.    
 
 ```{r fig.width=3, fig.height=6,echo=FALSE,out.extra='style="float:left"'}
 plotTable <- within(S_unigram_agg[1:20,], 
@@ -268,16 +268,25 @@ ngrem_prof <- ngrem_prof %>% mutate( percent.90 =paste("",round(coverage.90*100/
 
 ```
 
-```{r fig.width=3, fig.height=6,echo=FALSE, out.extra='style="float:none"'} 
-```
+<div style="clear:left">
+####The table below shows the number of unique terms required to provide given percentage of coverage of total words in the dataset. It appears that the distribution of the terms are exponential. For example, only 0.27% unique unigrams covers 50% of the total population, but it requires 14.73% to rich a 90% coverage. The Bigrams and Trigrams consists of much more unique combinations and requires exponentialy higher amount of unique terms to provide certain coverage. To rich a 50% coverage of trigrams in the dataset containing stop words, there are 40.88% unique combinations required.  
+</div>
 
-
-####The table below shows the number of unique terms required to provide given percentage of coverage of the dataset. It appears that the distribution of the terms are exponential. For example, only 121 unique unigrams covers 50% of the total words, but it requires 6488 to rich 90% coverage. The Bigrams and Trigrams consists of much more unique combinations and requires exponentialy higher amount of unique terms to provide certain coverage. 
-
-``````{r message=FALSE,echo=FALSE,warning=FALSE,options(width=120)}
+``````{r message=FALSE,echo=FALSE,warning=FALSE,options(width=600)}
 
 ngrem_prof   
 ```
+
+#Project planning and discussion
+The prediction model will take the user input and try to provide the ranked longest matching as recommendations. For example, once user has input three words, the algorithm will check against the 4-gram, 3-gram and 2-gram respectively trying to match the last 3, 2 and 1 words. A number of matching terms will be returned with the longest matching comes first. 
+
+###Current issues
+1. Is word stemming necessary before making the n-grams?
++ If so, the model will lose the power to predict various terms such as negations or tenses. But there should be some performance gain since the size of the n-gram should be much smaller. One possible way is to do stemming before building n-grams, and put the suffix such as "n't, ed, ing" back in the recommendations. However, it looks quite complex to achieve.  
+2. Whether to keep stop words in the n-grams
++ Same as above, there is a trade-off between the prediction power and the performance which needs to be tested on. Noting that stop words consists of above 35% of the total words in the learning dataset.  
+3. How to evaluate the prediction accuracy?
+4. How to store the n-grams model to rich better performance?
 
 
 ##Thanks for viewing :)
